@@ -1,0 +1,38 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno
+.env
+.env.local
+.env.development
+.env.production
+
+# Builds
+dist/
+build/
+.next/
+.expo/
+
+# Supabase
+supabase/.temp/
+
+# Editores
+.vscode/
+.idea/
+
+# Obsidian local
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+docs/.obsidian/cache/
+
+# Claude local
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
