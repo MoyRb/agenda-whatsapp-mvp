@@ -11,6 +11,15 @@ Agente de WhatsApp para gestión de citas: recibe mensajes de clientes, agenda e
 - **Calendario:** Google Calendar API (fuera de alcance — Corte 1)
 - **CLI:** Supabase CLI
 
+## Alcance del Corte Vertical 2
+
+Función implementada: `whatsapp-webhook`
+
+- Verificación del handshake de Meta (GET con `hub.verify_token`)
+- Recepción y validación HMAC-SHA256 de eventos POST
+- Logs sanitizados de mensajes y estados (sin contenido sensible)
+- Sin responder mensajes, sin base de datos, sin llamar a otras funciones
+
 ## Alcance del Corte Vertical 1
 
 Única función implementada: `whatsapp-send`
@@ -51,11 +60,26 @@ supabase functions deploy whatsapp-send --project-ref <PROJECT_REF>
 supabase secrets set --env-file ./supabase/.env.local --project-ref <PROJECT_REF>
 ```
 
-### Prueba
+### Prueba — whatsapp-send
 ```powershell
 # Requiere la variable de entorno definida en la sesión
 $env:INTERNAL_FUNCTION_SECRET = "tu-secret"
 .\tests\invoke-whatsapp-send.ps1 -Phone "+521234567890"
+```
+
+### Desarrollo local — webhook
+```bash
+supabase functions serve whatsapp-webhook --env-file ./supabase/.env.local
+```
+
+### Prueba — whatsapp-webhook
+```powershell
+$env:WHATSAPP_VERIFY_TOKEN = "tu-verify-token"
+$env:META_APP_SECRET = "tu-app-secret"
+.\tests\invoke-whatsapp-webhook.ps1 -Test get-valid
+.\tests\invoke-whatsapp-webhook.ps1 -Test get-invalid
+.\tests\invoke-whatsapp-webhook.ps1 -Test post-valid
+.\tests\invoke-whatsapp-webhook.ps1 -Test post-invalid
 ```
 
 ## Variables de entorno requeridas
@@ -73,7 +97,6 @@ Definir en `supabase/.env.local` (local) y via `supabase secrets set` (producci�
 
 ## Próximos módulos (fuera de alcance ahora)
 
-- Corte 2: Webhook de entrada WhatsApp (verificación HMAC + recepción de mensajes)
 - Corte 3: Integración Google Calendar
 - Base de datos / migraciones Supabase
 - Panel administrativo
