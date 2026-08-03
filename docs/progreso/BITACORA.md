@@ -122,3 +122,70 @@ El primer token usado había expirado o era de prueba. Se renovó el token en Me
 ### Estado final del Corte Vertical 1
 - Implementado: ✅
 - Validado: ✅
+
+---
+
+## 2026-07-31 — Corte Vertical 3: WhatsApp Flow estático de reservación
+
+### Qué se implementó
+
+- `whatsapp/flows/appointment-booking-static-v1.json` — Flow JSON v7.3 con 4 pantallas
+- `supabase/functions/whatsapp-flow-send/index.ts` — Edge Function para enviar el Flow
+- `supabase/config.toml` — añadido `[functions.whatsapp-flow-send] verify_jwt = false`
+- `supabase/functions/whatsapp-webhook/index.ts` — extendido para reconocer y loguear nfm_reply
+- `.env.example` — agregadas variables `META_GRAPH_API_VERSION` y `WHATSAPP_FLOW_ID`
+- `tests/flow-create-draft.ps1` — crear Flow DRAFT en Meta
+- `tests/flow-upload-json.ps1` — subir JSON con multipart/form-data
+- `tests/flow-get-validation.ps1` — consultar errores de validación
+- `tests/flow-publish.ps1` — publicar Flow (con confirmación manual)
+- `tests/flow-get-status.ps1` — consultar ID y estado del Flow
+- `tests/invoke-whatsapp-flow-send.ps1` — enviar Flow al teléfono
+- `tests/test-nfm-reply-parse.ps1` — prueba unitaria sintética de nfm_reply
+- `docs/producto/ALCANCE-MVP.md` — documentado Corte 3
+- `docs/ux/FLUJO-WHATSAPP.md` — pantallas, transiciones y limitaciones del Flow
+
+### Decisiones técnicas
+
+**Flow JSON v7.3 sin data endpoint:**
+Se elige el modo estático (sin `data_api_version` ni `data_channel_uri`) para eliminar
+la necesidad de un endpoint HTTPS propio, cifrado RSA y validación de payload cifrado.
+El trade-off es que el resumen en CONFIRMATION muestra IDs internos (ej. "haircut")
+en lugar de etiquetas legibles. Se documenta como limitación conocida de este corte.
+
+**Función `whatsapp-flow-send` separada de `whatsapp-send`:**
+Ambas funciones envían mensajes distintos (template vs. interactive flow) y tienen
+parámetros de request diferentes. Mantenerlas separadas respeta el principio de
+responsabilidad única y evita acoplar la lógica de autenticación de Flow con la de
+plantillas.
+
+**`flow_id` resoluble por request O variable de entorno:**
+El `flow_id` no se conoce hasta que Meta crea el Flow DRAFT. Se acepta en el body del
+request (prioritario) con fallback a `WHATSAPP_FLOW_ID`. Esto permite pruebas antes de
+configurar el env var en producción.
+
+**`mode` como parámetro opcional (default "published"):**
+Meta requiere `mode: "published"` para envíos reales pero `mode: "draft"` para probar
+el Flow antes de publicarlo. Se expone como parámetro para permitir las dos fases.
+
+**Extensión mínima del webhook:**
+Se añade solo la rama `if (msg.type === "interactive")` en el loop existente.
+La función `logInteractiveMessage` maneja tanto `nfm_reply` como otros tipos de
+interactivos. No se modifica la lógica de verificación HMAC ni de statuses.
+
+**Parseo defensivo de `response_json`:**
+`response_json` llega como string JSON-embebido. Se parsea con try/catch y se valida
+que sea un objeto (no null, no array). Solo se extraen las 5 claves esperadas; todas
+las demás se ignoran silenciosamente. Nunca se loguea el JSON crudo.
+
+**Scripts PS 5.1 para Flow management:**
+`flow-upload-json.ps1` usa `[System.Net.Http.HttpClient]` + `MultipartFormDataContent`
+(disponible en .NET 4.5+ que viene con PS 5.1) para construir el multipart correcto.
+Los demás scripts usan `Invoke-RestMethod` que es más simple y suficiente para
+llamadas GET y POST con JSON.
+
+### Estado al cierre
+- Implementado: ✅
+- Flow validado con Meta: pendiente — requiere ejecutar flow-create-draft + flow-upload-json + flow-get-validation
+- Flow publicado: pendiente — requiere aprobación manual
+- Validado en WhatsApp: pendiente — requiere Flow publicado y teléfono autorizado
+- Respuesta validada: pendiente — requiere completar el Flow en el teléfono

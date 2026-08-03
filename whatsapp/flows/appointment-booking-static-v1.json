@@ -1,0 +1,216 @@
+{
+  "version": "7.3",
+  "screens": [
+    {
+      "id": "SERVICE",
+      "title": "Elige tu servicio",
+      "data": {},
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_service",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "service_id",
+                "label": "Selecciona un servicio",
+                "required": true,
+                "data-source": [
+                  { "id": "haircut",       "title": "Corte de cabello" },
+                  { "id": "beard",         "title": "Barba" },
+                  { "id": "haircut_beard", "title": "Corte y barba" },
+                  { "id": "hair_dye",      "title": "Tinte" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Siguiente",
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": { "type": "screen", "name": "EXTRAS" },
+                  "payload": {
+                    "service_id": "${form.service_id}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "EXTRAS",
+      "title": "Agrega extras",
+      "data": {
+        "service_id": {
+          "type": "string",
+          "__example__": "haircut"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_extras",
+            "children": [
+              {
+                "type": "CheckboxGroup",
+                "name": "extra_ids",
+                "label": "Extras opcionales (puedes elegir varios)",
+                "required": false,
+                "max-selected-items": 4,
+                "data-source": [
+                  { "id": "wash",         "title": "Lavado" },
+                  { "id": "mask",         "title": "Mascarilla" },
+                  { "id": "beard_design", "title": "Diseno de barba" },
+                  { "id": "treatment",    "title": "Tratamiento" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Siguiente",
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": { "type": "screen", "name": "SCHEDULE" },
+                  "payload": {
+                    "service_id": "${data.service_id}",
+                    "extra_ids":  "${form.extra_ids}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SCHEDULE",
+      "title": "Elige fecha y hora",
+      "data": {
+        "service_id": {
+          "type": "string",
+          "__example__": "haircut"
+        },
+        "extra_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "__example__": ["wash"]
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "form_schedule",
+            "children": [
+              {
+                "type": "DatePicker",
+                "name": "appointment_date",
+                "label": "Fecha de la cita",
+                "required": true
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "appointment_time",
+                "label": "Horario disponible",
+                "required": true,
+                "data-source": [
+                  { "id": "10_00", "title": "10:00" },
+                  { "id": "11_30", "title": "11:30" },
+                  { "id": "13_00", "title": "13:00" },
+                  { "id": "16_30", "title": "16:30" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Revisar reservacion",
+                "on-click-action": {
+                  "name": "navigate",
+                  "next": { "type": "screen", "name": "CONFIRMATION" },
+                  "payload": {
+                    "service_id":       "${data.service_id}",
+                    "extra_ids":        "${data.extra_ids}",
+                    "appointment_date": "${form.appointment_date}",
+                    "appointment_time": "${form.appointment_time}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "CONFIRMATION",
+      "title": "Confirmar cita",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "service_id": {
+          "type": "string",
+          "__example__": "haircut"
+        },
+        "extra_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "__example__": ["wash"]
+        },
+        "appointment_date": {
+          "type": "string",
+          "__example__": "2026-08-15"
+        },
+        "appointment_time": {
+          "type": "string",
+          "__example__": "10_00"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "Resumen de tu cita"
+          },
+          {
+            "type": "TextBody",
+            "text": "Servicio: ${data.service_id}"
+          },
+          {
+            "type": "TextBody",
+            "text": "Extras: ${data.extra_ids}"
+          },
+          {
+            "type": "TextBody",
+            "text": "Fecha: ${data.appointment_date}"
+          },
+          {
+            "type": "TextBody",
+            "text": "Horario: ${data.appointment_time}"
+          },
+          {
+            "type": "TextCaption",
+            "text": "Al confirmar, tu solicitud quedara registrada y nos pondremos en contacto contigo."
+          },
+          {
+            "type": "Footer",
+            "label": "Confirmar cita",
+            "on-click-action": {
+              "name": "complete",
+              "payload": {
+                "service_id":       "${data.service_id}",
+                "extra_ids":        "${data.extra_ids}",
+                "appointment_date": "${data.appointment_date}",
+                "appointment_time": "${data.appointment_time}",
+                "flow_version":     "appointment-booking-static-v1"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

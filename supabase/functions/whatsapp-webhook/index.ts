@@ -117,7 +117,18 @@ async function handleEvent(req: Request): Promise<Response> {
       changes?: Array<{
         value?: {
           metadata?: { phone_number_id?: string };
-          messages?: Array<{ from?: string; id?: string; type?: string }>;
+          messages?: Array<{
+            from?: string;
+            id?: string;
+            type?: string;
+            interactive?: {
+              type?: string;
+              nfm_reply?: {
+                response_json?: string;
+                name?: string;
+              };
+            };
+          }>;
           statuses?: Array<{ recipient_id?: string; id?: string; status?: string }>;
         };
       }>;
@@ -137,14 +148,18 @@ async function handleEvent(req: Request): Promise<Response> {
 
       if (Array.isArray(value.messages)) {
         for (const msg of value.messages) {
-          console.log(JSON.stringify({
-            type: "message",
-            wabaId,
-            phoneNumberId,
-            messageId: msg.id ?? "",
-            messageType: msg.type ?? "",
-            from: maskPhone(msg.from ?? ""),
-          }));
+          if (msg.type === "interactive") {
+            logInteractiveMessage(msg, wabaId, phoneNumberId);
+          } else {
+            console.log(JSON.stringify({
+              type: "message",
+              wabaId,
+              phoneNumberId,
+              messageId: msg.id ?? "",
+              messageType: msg.type ?? "",
+              from: maskPhone(msg.from ?? ""),
+            }));
+          }
         }
       } else if (Array.isArray(value.statuses)) {
         for (const stat of value.statuses) {
@@ -168,6 +183,85 @@ async function handleEvent(req: Request): Promise<Response> {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Manejador de mensajes interactivos (nfm_reply de WhatsApp Flows)
+// ---------------------------------------------------------------------------
+function logInteractiveMessage(
+  msg: {
+    from?: string;
+    id?: string;
+    interactive?: {
+      type?: string;
+      nfm_reply?: { response_json?: string; name?: string };
+    };
+  },
+  wabaId: string,
+  phoneNumberId: string,
+): void {
+  const interactiveType = msg.interactive?.type ?? "";
+
+  if (interactiveType !== "nfm_reply") {
+    console.log(JSON.stringify({
+      type: "interactive_other",
+      wabaId,
+      phoneNumberId,
+      messageId: msg.id ?? "",
+      interactiveType,
+      from: maskPhone(msg.from ?? ""),
+    }));
+    return;
+  }
+
+  // Parsear response_json de forma segura; nunca loguear el JSON completo
+  const rawJson = msg.interactive?.nfm_reply?.response_json ?? "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    console.warn(JSON.stringify({
+      type: "flow_response_parse_error",
+      wabaId,
+      phoneNumberId,
+      messageId: msg.id ?? "",
+    }));
+    return;
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    console.warn(JSON.stringify({
+      type: "flow_response_invalid",
+      wabaId,
+      phoneNumberId,
+      messageId: msg.id ?? "",
+    }));
+    return;
+  }
+
+  // Extraer solo claves conocidas; ignorar claves desconocidas
+  const r = parsed as Record<string, unknown>;
+
+  const serviceId = typeof r["service_id"] === "string" ? r["service_id"] : "";
+  const extraIds = Array.isArray(r["extra_ids"])
+    ? (r["extra_ids"] as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  const appointmentDate = typeof r["appointment_date"] === "string" ? r["appointment_date"] : "";
+  const appointmentTime = typeof r["appointment_time"] === "string" ? r["appointment_time"] : "";
+  const flowVersion     = typeof r["flow_version"]     === "string" ? r["flow_version"]     : "";
+
+  console.log(JSON.stringify({
+    type: "flow_response",
+    wabaId,
+    phoneNumberId,
+    messageId: msg.id ?? "",
+    sender: maskPhone(msg.from ?? ""),
+    serviceId,
+    extraIds,
+    appointmentDate,
+    appointmentTime,
+    flowVersion,
+  }));
 }
 
 // ---------------------------------------------------------------------------

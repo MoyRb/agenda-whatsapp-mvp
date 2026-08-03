@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.whatsapp-webhook]
 verify_jwt = false
+
+[functions.whatsapp-flow-send]
+verify_jwt = false

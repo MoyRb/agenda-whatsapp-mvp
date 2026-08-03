@@ -11,6 +11,15 @@ Agente de WhatsApp para gestión de citas: recibe mensajes de clientes, agenda e
 - **Calendario:** Google Calendar API (fuera de alcance — Corte 1)
 - **CLI:** Supabase CLI
 
+## Alcance del Corte Vertical 3
+
+Funciones implementadas: `whatsapp-flow-send` + webhook extendido
+
+- Flow JSON v7.3 con 4 pantallas: SERVICE → EXTRAS → SCHEDULE → CONFIRMATION
+- Edge Function `whatsapp-flow-send` envía el formulario interactivo (tipo "flow")
+- Webhook extendido detecta y loguea respuestas `nfm_reply` de forma sanitizada
+- Sin base de datos, sin Google Calendar, sin disponibilidad dinámica, sin data endpoint
+
 ## Alcance del Corte Vertical 2
 
 Función implementada: `whatsapp-webhook`
@@ -82,6 +91,49 @@ $env:META_APP_SECRET = "tu-app-secret"
 .\tests\invoke-whatsapp-webhook.ps1 -Test post-invalid
 ```
 
+### Desarrollo local — whatsapp-flow-send
+```bash
+supabase functions serve whatsapp-flow-send --env-file ./supabase/.env.local
+```
+
+### Prueba — whatsapp-flow-send
+```powershell
+$env:INTERNAL_FUNCTION_SECRET = "tu-secret"
+$env:WHATSAPP_FLOW_ID         = "id-del-flow-creado"
+.\tests\invoke-whatsapp-flow-send.ps1 -Phone "+52XXXXXXXXXX"
+# Con Flow aun en DRAFT (antes de publicar):
+.\tests\invoke-whatsapp-flow-send.ps1 -Phone "+52XXXXXXXXXX" -Mode draft
+```
+
+### Gestión del Flow en Meta
+```powershell
+# 1. Crear Flow DRAFT
+$env:WHATSAPP_ACCESS_TOKEN        = "tu-token"
+$env:WHATSAPP_BUSINESS_ACCOUNT_ID = "tu-waba-id"
+$env:META_GRAPH_API_VERSION       = "v20.0"
+.\tests\flow-create-draft.ps1 -Name "Reservacion de cita"
+
+# 2. Subir JSON
+.\tests\flow-upload-json.ps1 -FlowId <ID> -FilePath "whatsapp\flows\appointment-booking-static-v1.json"
+
+# 3. Consultar errores de validación
+.\tests\flow-get-validation.ps1 -FlowId <ID>
+
+# 4. Publicar (solo después de revisión manual; acción irreversible)
+.\tests\flow-publish.ps1 -FlowId <ID>
+
+# 5. Consultar estado
+.\tests\flow-get-status.ps1 -FlowId <ID>
+```
+
+### Prueba unitaria sintética — nfm_reply
+```powershell
+# El webhook debe estar corriendo con supabase functions serve
+$env:META_APP_SECRET = "tu-app-secret"
+.\tests\test-nfm-reply-parse.ps1
+# Revisar consola del servidor: debe aparecer type="flow_response"
+```
+
 ## Variables de entorno requeridas
 
 Definir en `supabase/.env.local` (local) y via `supabase secrets set` (producción):
@@ -94,11 +146,13 @@ Definir en `supabase/.env.local` (local) y via `supabase secrets set` (producci�
 | `META_GRAPH_API_VERSION` | Sí | Ej. `v19.0`. Sin fallback — obligatorio |
 | `WHATSAPP_VERIFY_TOKEN` | No (Corte 2) | Para verificación del webhook |
 | `META_APP_SECRET` | No (Corte 2) | Para firma HMAC del webhook |
+| `META_GRAPH_API_VERSION` | Sí | Ej. `v20.0`. Sin fallback — obligatorio |
+| `WHATSAPP_FLOW_ID` | No (Corte 3) | ID del Flow publicado en Meta. Puede pasarse en el request |
 
 ## Próximos módulos (fuera de alcance ahora)
 
-- Corte 3: Integración Google Calendar
+- Corte 4: Integración Google Calendar
 - Base de datos / migraciones Supabase
 - Panel administrativo
 - Lógica de fidelización
-- WhatsApp Flows / Embedded Signup
+- WhatsApp Flows con endpoint dinámico / Embedded Signup
