@@ -186,6 +186,217 @@ llamadas GET y POST con JSON.
 ### Estado al cierre
 - Implementado: ✅
 - Flow validado con Meta: pendiente — requiere ejecutar flow-create-draft + flow-upload-json + flow-get-validation
-- Flow publicado: pendiente — requiere aprobación manual
-- Validado en WhatsApp: pendiente — requiere Flow publicado y teléfono autorizado
-- Respuesta validada: pendiente — requiere completar el Flow en el teléfono
+- Flow publicado: pendiente — requiere aprobacion manual
+- Validado en WhatsApp: pendiente — requiere Flow publicado y telefono autorizado
+- Respuesta validada: pendiente — requiere completar el Flow en el telefono
+
+---
+
+## 2026-08-03 — Corte Vertical 4: Nucleo de datos multiempresa
+
+### Que se implemento
+
+- `supabase/migrations/20260803120000_create_booking_core.sql` — migracion completa
+  - 9 tablas: businesses, business_members, services, extras, service_extras, business_hours, customers, appointments, appointment_extras
+  - Funcion `set_updated_at()` con SECURITY INVOKER y search_path vacio
+  - Funciones RLS helper `is_business_member` y `has_business_role` con SECURITY DEFINER
+  - RLS habilitado en todas las tablas con politicas por rol
+  - Triggers de updated_at en 6 tablas
+  - 15 indices (incluyendo 2 unicos parciales)
+  - CHECKs de consistencia cross-business en service_extras y appointment_extras
+- `supabase/seed.sql` — seed idempotente con ON CONFLICT DO NOTHING
+  - Negocio demo con UUID fijo `00000000-0000-0000-0000-000000000001`
+  - 4 servicios con codigos sincronizados con Flow JSON (haircut, beard, haircut_beard, hair_dye)
+  - 4 extras con codigos sincronizados con Flow JSON (wash, mask, beard_design, treatment)
+  - 16 relaciones service_extras (todos los extras para todos los servicios)
+  - 7 filas de business_hours (dom cerrado, lun-sab 09:00-19:00)
+- `tests/booking-schema-smoke.sql` — 14 tests SQL con DO blocks aislados
+- `docs/arquitectura/MODELO-DATOS.md` — modelo relacional completo con decisiones
+- `docs/arquitectura/ARQUITECTURA.md` — arquitectura general del sistema
+
+### Decisiones tecnicas
+
+**Funciones RLS SECURITY DEFINER:**
+Si las politicas de `business_members` llamaran a `is_business_member()`, que consulta `business_members`, habria recursion infinita. SECURITY DEFINER permite que la funcion consulte la tabla con privilegios del rol dueno, ignorando RLS dentro de la funcion.
+
+**`(SELECT auth.uid())` como optimization fence:**
+Usar `auth.uid()` directamente en una funcion STABLE puede causar que Postgres la invoque por cada fila. Envolviendo en `(SELECT ...)` se fuerza evaluacion unica por consulta.
+
+**CHECKs en lugar de triggers para cross-business:**
+Un CHECK CONSTRAINT que subconsulta la tabla padre es suficiente porque `business_id` no cambia en operaciones normales. Es mas simple que un trigger y se evalua atomicamente con el INSERT/UPDATE.
+
+**Indice parcial para external_reference:**
+`WHERE external_reference IS NOT NULL` permite que multiples citas tengan `external_reference = NULL` sin violar el unique. Solo se indexan los valores no nulos, que son los que necesitan ser unicos por negocio (para idempotencia en Corte 5).
+
+**UUIDs fijos en seed:**
+Permiten referencias reproducibles en tests y seeds adicionales sin necesidad de buscar IDs con SELECT. Patron nillike: `00000000-0000-0000-XXXX-000000000YYY`.
+
+**ON DELETE RESTRICT como regla general:**
+Protege datos historicos (no borrar servicio si tiene citas, no borrar cliente si tiene citas). CASCADE solo en relaciones de configuracion propia (business_hours, service_extras). SET NULL en created_by para preservar citas cuando el admin desaparece.
+
+**Seed sin usuarios ni citas:**
+El seed solo incluye catalogo (negocio, servicios, extras, horarios). Usuarios y citas se crean en pruebas o en produccion real. No mezclar datos de catalogo con datos transaccionales en el seed.
+
+### Estado al cierre
+- Implementado: ✅
+- Validado localmente (supabase db reset + smoke tests): pendiente — requiere Docker y supabase start
+- Validado en produccion (supabase db push): pendiente — requiere autorizacion del usuario
+
+---
+
+## 2026-08-03 — Corte 4, rev 2: corrección de CHECK con subquery → FK compuestas
+
+### Problema detectado
+
+PostgreSQL no permite subqueries dentro de CHECK constraints definidos en la tabla (`ALTER TABLE ... ADD CONSTRAINT ... CHECK (SELECT ...)`). La migración original usaba ese patron en tres lugares:
+
+- `service_extras_same_business` en `service_extras`
+- `appointments_customer_same_business` y `appointments_service_same_business` en `appointments`
+- `appointment_extras_same_business` en `appointment_extras`
+
+### Solución: foreign keys compuestas
+
+La consistencia cross-business se garantiza de forma estructural mediante FK compuestas:
+
+1. Se agregaron constraints `UNIQUE (id, business_id)` en las tablas padre:
+   - `services_id_business_id_key` en `services`
+   - `extras_id_business_id_key` en `extras`
+   - `customers_id_business_id_key` en `customers`
+   - `appointments_id_business_id_key` en `appointments`
+
+2. `service_extras` recibio columna `business_id NOT NULL` y PK cambiada a `(business_id, service_id, extra_id)`:
+   - FK compuesta `(service_id, business_id) → services(id, business_id)` ON DELETE CASCADE
+   - FK compuesta `(extra_id, business_id)   → extras(id, business_id)`   ON DELETE CASCADE
+
+3. `appointments` reemplaza FKs simples de `customer_id` y `service_id` por FKs compuestas:
+   - FK `(customer_id, business_id) → customers(id, business_id)` ON DELETE RESTRICT
+   - FK `(service_id, business_id)  → services(id, business_id)`  ON DELETE RESTRICT
+   - Se eliminaron los dos CHECK con subquery
+
+4. `appointment_extras` recibio columna `business_id NOT NULL` y PK cambiada a `(business_id, appointment_id, extra_id)`:
+   - FK compuesta `(appointment_id, business_id) → appointments(id, business_id)` ON DELETE CASCADE
+   - FK compuesta `(extra_id, business_id)       → extras(id, business_id)`       ON DELETE RESTRICT
+
+### Mejoras adicionales en la misma revision
+
+**REVOKE/GRANT en helpers RLS:**
+- `REVOKE EXECUTE FROM PUBLIC` y `FROM anon` en `is_business_member` y `has_business_role`
+- `GRANT EXECUTE TO authenticated` solamente
+- Impide invocacion directa desde clientes no autenticados
+
+**Politicas business_members endurecidas:**
+- INSERT: admin solo puede agregar `staff`; no puede crear owners ni admins
+- UPDATE (USING): admin solo puede modificar filas cuyo `role` actual sea `staff`
+- UPDATE (WITH CHECK): admin solo puede asignar `role='staff'`; owner no puede degradar si queda como unico owner
+- DELETE: admin solo puede eliminar `staff`; no puede eliminar el ultimo owner
+
+**RLS service_extras y appointment_extras simplificado:**
+- Antes: subquery para obtener `business_id` desde la tabla padre
+- Ahora: uso directo de la columna `business_id` de la misma tabla
+
+**Seed actualizado:**
+- `service_extras` ahora incluye `business_id` en el INSERT (parte de la nueva PK)
+- `ON CONFLICT (business_id, service_id, extra_id) DO NOTHING`
+
+**Smoke tests actualizados:**
+- Test 05: `service_extras` ahora espera `foreign_key_violation` en lugar de `check_violation`
+- Test 15 (nuevo): appointment con servicio de negocio distinto → `foreign_key_violation`
+- Test 16 (nuevo): verifica que las 4 tablas padre tienen UNIQUE(id, business_id)
+- Total: 14 → 16 tests
+
+### Archivos modificados
+- `supabase/migrations/20260803120000_create_booking_core.sql` — reescritura completa
+- `supabase/seed.sql` — business_id en service_extras
+- `tests/booking-schema-smoke.sql` — 16 tests, FK compuesta
+- `docs/arquitectura/MODELO-DATOS.md` — tablas, FK compuestas, RLS
+- `docs/arquitectura/ARQUITECTURA.md` — decision cross-business
+- `CLAUDE.md` — scope Corte 4 actualizado
+
+---
+
+## 2026-08-03 — Corte 4, rev 3: auditoria de seguridad RLS + tests de escalada de privilegios
+
+### Contexto
+
+Tras pasar 16 smoke tests con `supabase db reset --local`, se realizo una auditoria de seguridad enfocada en las politicas RLS de `business_members` antes del despliegue a produccion.
+
+### Problema detectado: funcion creada antes que la tabla referenciada
+
+Al ejecutar `supabase start` se produjo:
+
+```
+ERROR: relation "public.business_members" does not exist
+```
+
+Causa: `LANGUAGE sql` valida el cuerpo de la funcion en tiempo de creacion. `is_business_member` referenciaba `business_members` antes de que la tabla existiera en el archivo de migracion.
+
+**Solucion**: reestructuracion en 8 secciones estrictas:
+1. `set_updated_at` (funcion sin dependencias de tabla)
+2. `CREATE TABLE x9` (todas las tablas primero)
+3. Constraints, FK compuestas, indices (en ALTER TABLE separados)
+4. Funciones helper RLS (despues de que `business_members` existe)
+5. REVOKE/GRANT
+6. ENABLE ROW LEVEL SECURITY
+7. CREATE POLICY
+8. CREATE TRIGGER
+
+### Auditoria de seguridad: business_members
+
+| Regla | Mecanismo | Verificado |
+|-------|-----------|------------|
+| Admin no puede insertar owner/admin | `WITH CHECK (role = 'staff' OR has_business_role([owner]))` | T18, T19 |
+| Admin no puede modificar fila de owner/admin | `USING (role = 'staff' OR has_business_role([owner]))` | T20 |
+| Admin no puede promover staff → owner/admin | `WITH CHECK (role = 'staff' OR ...)` | T21 |
+| Ultimo owner no puede eliminarse | `NOT (role='owner' AND COUNT(owners)<=1)` en USING | T22 |
+| Ultimo owner no puede degradarse | `COUNT(owners)>1 OR role='owner'` en WITH CHECK | T23 |
+| Owner puede agregar admin (positivo) | politica normal sin restriccion de rol destino | T24 |
+
+### Proteccion del ultimo owner
+
+Implementada en dos politicas:
+
+**DELETE USING:**
+```sql
+AND NOT (
+  role = 'owner'
+  AND (SELECT count(*) FROM public.business_members bm2
+       WHERE bm2.business_id = business_members.business_id
+         AND bm2.role = 'owner') <= 1
+)
+```
+
+**UPDATE WITH CHECK:**
+```sql
+AND (
+  role = 'owner'
+  OR (SELECT count(*) FROM public.business_members bm2
+      WHERE bm2.business_id = business_members.business_id
+        AND bm2.role = 'owner') > 1
+)
+```
+
+RLS silencia DML bloqueado (0 filas afectadas, sin error). Los tests verifican con `GET DIAGNOSTICS v_rows = ROW_COUNT` y comparacion de conteo antes/despues.
+
+### Tests agregados: T17-T25
+
+- **T17**: Setup — crea negocio de prueba, 4 auth.users sinteticos, 3 miembros (owner, admin, staff) con UUIDs `cc00`
+- **T18**: admin no puede insertar owner → conteo de owners sin cambio
+- **T19**: admin no puede insertar admin → conteo de admins sin cambio
+- **T20**: admin no puede actualizar fila de owner → `GET DIAGNOSTICS = 0`
+- **T21**: admin no puede promover staff → owner → rol sigue siendo 'staff'
+- **T22**: ultimo owner no puede eliminarse → fila sigue existiendo
+- **T23**: ultimo owner no puede degradarse → rol sigue siendo 'owner'
+- **T24**: owner puede agregar admin (positivo) → fila existe luego del INSERT
+- **T25**: Teardown — elimina todos los datos `cc00`, verifica 0 filas residuales
+
+### Total final de smoke tests: 16 + 9 = 25
+
+### Validacion local confirmada
+
+`supabase db reset --local` + `psql -f tests/booking-schema-smoke.sql`: **25 PASS, 0 FAIL**
+
+### Archivos modificados
+- `supabase/migrations/20260803120000_create_booking_core.sql` — seccion 8 estricta, politicas endurecidas
+- `tests/booking-schema-smoke.sql` — 25 tests (T01-T25)
+- `docs/progreso/ESTADO-ACTUAL.md` — 25 tests, validacion local ✅
+- `docs/progreso/BITACORA.md` — esta entrada
