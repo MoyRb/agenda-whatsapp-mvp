@@ -27,16 +27,28 @@
 - Scripts PowerShell para crear, subir, validar y publicar el Flow en Meta
 - Sin base de datos, sin Google Calendar, sin disponibilidad dinamica
 
+## Corte Vertical 4 — Nucleo de datos multiempresa
+
+**Estado: Implementado**
+
+- Migracion reproducible: 9 tablas con RLS, indices y triggers
+- Esquema multiempresa desde el inicio (`business_id` en todas las tablas)
+- Funciones helper RLS `SECURITY DEFINER` para evitar recursion
+- CHECKs de consistencia cross-business en `service_extras` y `appointment_extras`
+- Seed idempotente con negocio demo y UUIDs fijos
+- Codigos de servicio/extra sincronizados con el Flow JSON estatico (Corte 3)
+- 14 smoke tests SQL para validar constraints, seed y RLS
+- Sin conexion a Edge Functions (eso es Corte 5+)
+
 ## Fuera de alcance (MVP actual)
 
 - Endpoint dinamico de Flow (data endpoint + RSA)
-- Supabase Database / migraciones
+- Conexion Edge Functions → Base de datos
 - Disponibilidad real de horarios
 - Prevencion de horarios duplicados
 - Google Calendar
 - Panel administrativo
 - Fidelizacion
-- Multiples negocios
 - Embedded Signup
 - Respuestas automaticas
 - Pagos

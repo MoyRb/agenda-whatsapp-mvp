@@ -11,6 +11,17 @@ Agente de WhatsApp para gestión de citas: recibe mensajes de clientes, agenda e
 - **Calendario:** Google Calendar API (fuera de alcance — Corte 1)
 - **CLI:** Supabase CLI
 
+## Alcance del Corte Vertical 4
+
+Capa de persistencia en Supabase/PostgreSQL — sin conexion a Edge Functions aun.
+
+- Migracion: 9 tablas con RLS multiempresa, indices, FK compuestas para consistencia cross-business
+- Funciones helper RLS SECURITY DEFINER (REVOKE PUBLIC/anon, GRANT authenticated)
+- business_members: politicas endurecidas — admin no puede escalar privilegios ni afectar owners; proteccion ultimo owner
+- Seed idempotente con negocio demo y UUIDs fijos sincronizados con el Flow JSON
+- 25 smoke tests SQL: T01-T16 constraints/FK/seed + T17-T25 escalada de privilegios RLS
+- Sin panel web, sin Google Calendar, sin conexion BD↔Edge Functions
+
 ## Alcance del Corte Vertical 3
 
 Funciones implementadas: `whatsapp-flow-send` + webhook extendido
@@ -132,6 +143,26 @@ $env:META_GRAPH_API_VERSION       = "v20.0"
 $env:META_APP_SECRET = "tu-app-secret"
 .\tests\test-nfm-reply-parse.ps1
 # Revisar consola del servidor: debe aparecer type="flow_response"
+```
+
+### Migraciones locales (Corte 4+)
+```bash
+# Requiere Docker corriendo: supabase start
+supabase db reset --local          # aplica migraciones + seed desde cero
+supabase migration new <nombre>    # crear nueva migración vacía
+```
+
+### Smoke tests de esquema
+```bash
+# Requiere supabase start + supabase db reset --local previos
+psql postgresql://postgres:postgres@localhost:54322/postgres \
+  -f tests/booking-schema-smoke.sql
+```
+
+### Deploy de migraciones a producción
+```bash
+# Requiere autorización explícita del usuario
+supabase db push --project-ref <PROJECT_REF>
 ```
 
 ## Variables de entorno requeridas
