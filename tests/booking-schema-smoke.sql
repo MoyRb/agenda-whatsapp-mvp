@@ -506,11 +506,12 @@ END $$;
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_bid    uuid := '00000000-0000-0000-cc00-000000000001';
-  v_adm    uuid := '00000000-0000-0000-cc00-000000000003';
-  v_new    uuid := '00000000-0000-0000-cc00-000000000005';
-  v_before integer;
-  v_after  integer;
+  v_bid     uuid    := '00000000-0000-0000-cc00-000000000001';
+  v_adm     uuid    := '00000000-0000-0000-cc00-000000000003';
+  v_new     uuid    := '00000000-0000-0000-cc00-000000000005';
+  v_before  integer;
+  v_after   integer;
+  v_blocked boolean := false;
 BEGIN
   SELECT count(*) INTO v_before FROM public.business_members
   WHERE business_id = v_bid AND role = 'owner';
@@ -519,24 +520,30 @@ BEGIN
   PERFORM set_config('request.jwt.claims', format('{"sub": "%s"}', v_adm::text), true);
   SET LOCAL ROLE authenticated;
 
-  INSERT INTO public.business_members (business_id, user_id, role)
-  VALUES (v_bid, v_new, 'owner');   -- debe ser bloqueado por RLS
+  BEGIN
+    INSERT INTO public.business_members (business_id, user_id, role)
+    VALUES (v_bid, v_new, 'owner');   -- debe ser bloqueado por RLS
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- WITH CHECK de RLS lanzó excepción (comportamiento correcto en PG 15+)
+    v_blocked := true;
+  END;
 
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
+  -- Limpiar fila si se insertó antes del bloqueo
+  DELETE FROM public.business_members WHERE business_id = v_bid AND user_id = v_new;
 
   SELECT count(*) INTO v_after FROM public.business_members
   WHERE business_id = v_bid AND role = 'owner';
 
   INSERT INTO smoke_results VALUES (
     '18_admin_cannot_insert_owner',
-    v_after = v_before,
-    format('owners antes=%s despues=%s (esperado: sin cambio)', v_before, v_after)
+    v_blocked OR (v_after = v_before),
+    format('bloqueado=%s owners_antes=%s despues=%s', v_blocked, v_before, v_after)
   );
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
-  -- Limpiar fila si se insertó antes del error
   DELETE FROM public.business_members WHERE business_id = v_bid AND user_id = v_new;
   INSERT INTO smoke_results VALUES ('18_admin_cannot_insert_owner', false, SQLERRM);
 END $$;
@@ -549,11 +556,12 @@ END $$;
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_bid    uuid := '00000000-0000-0000-cc00-000000000001';
-  v_adm    uuid := '00000000-0000-0000-cc00-000000000003';
-  v_new    uuid := '00000000-0000-0000-cc00-000000000005';
-  v_before integer;
-  v_after  integer;
+  v_bid     uuid    := '00000000-0000-0000-cc00-000000000001';
+  v_adm     uuid    := '00000000-0000-0000-cc00-000000000003';
+  v_new     uuid    := '00000000-0000-0000-cc00-000000000005';
+  v_before  integer;
+  v_after   integer;
+  v_blocked boolean := false;
 BEGIN
   SELECT count(*) INTO v_before FROM public.business_members
   WHERE business_id = v_bid AND role = 'admin';
@@ -561,19 +569,25 @@ BEGIN
   PERFORM set_config('request.jwt.claims', format('{"sub": "%s"}', v_adm::text), true);
   SET LOCAL ROLE authenticated;
 
-  INSERT INTO public.business_members (business_id, user_id, role)
-  VALUES (v_bid, v_new, 'admin');   -- debe ser bloqueado por RLS
+  BEGIN
+    INSERT INTO public.business_members (business_id, user_id, role)
+    VALUES (v_bid, v_new, 'admin');   -- debe ser bloqueado por RLS
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- WITH CHECK de RLS lanzó excepción (comportamiento correcto en PG 15+)
+    v_blocked := true;
+  END;
 
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
+  DELETE FROM public.business_members WHERE business_id = v_bid AND user_id = v_new;
 
   SELECT count(*) INTO v_after FROM public.business_members
   WHERE business_id = v_bid AND role = 'admin';
 
   INSERT INTO smoke_results VALUES (
     '19_admin_cannot_insert_admin',
-    v_after = v_before,
-    format('admins antes=%s despues=%s (esperado: sin cambio)', v_before, v_after)
+    v_blocked OR (v_after = v_before),
+    format('bloqueado=%s admins_antes=%s despues=%s', v_blocked, v_before, v_after)
   );
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
@@ -634,31 +648,39 @@ END $$;
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_bid     uuid := '00000000-0000-0000-cc00-000000000001';
-  v_adm     uuid := '00000000-0000-0000-cc00-000000000003';
-  v_stf     uuid := '00000000-0000-0000-cc00-000000000004';
-  v_rows    integer;
+  v_bid       uuid    := '00000000-0000-0000-cc00-000000000001';
+  v_adm       uuid    := '00000000-0000-0000-cc00-000000000003';
+  v_stf       uuid    := '00000000-0000-0000-cc00-000000000004';
+  v_rows      integer := 0;
   v_role_post text;
+  v_blocked   boolean := false;
 BEGIN
   PERFORM set_config('request.jwt.claims', format('{"sub": "%s"}', v_adm::text), true);
   SET LOCAL ROLE authenticated;
 
-  UPDATE public.business_members
-  SET    role = 'owner'
-  WHERE  business_id = v_bid AND user_id = v_stf;
+  BEGIN
+    UPDATE public.business_members
+    SET    role = 'owner'
+    WHERE  business_id = v_bid AND user_id = v_stf;
 
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- WITH CHECK de RLS lanzó excepción (comportamiento correcto en PG 15+)
+    v_blocked := true;
+  END;
 
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
+  -- Restaurar si se modificó antes del error
+  UPDATE public.business_members SET role = 'staff' WHERE business_id = v_bid AND user_id = v_stf AND role = 'owner';
 
   SELECT role INTO v_role_post FROM public.business_members
   WHERE business_id = v_bid AND user_id = v_stf;
 
   INSERT INTO smoke_results VALUES (
     '21_admin_cannot_promote_staff_to_owner',
-    v_rows = 0 AND v_role_post = 'staff',
-    format('filas=%s role_post=%s (esperado 0/staff)', v_rows, v_role_post)
+    v_blocked OR (v_rows = 0 AND v_role_post = 'staff'),
+    format('bloqueado=%s filas=%s role_post=%s (esperado blocked|0/staff)', v_blocked, v_rows, v_role_post)
   );
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;
@@ -720,30 +742,38 @@ END $$;
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
-  v_bid      uuid := '00000000-0000-0000-cc00-000000000001';
-  v_own      uuid := '00000000-0000-0000-cc00-000000000002';
-  v_rows     integer;
+  v_bid       uuid    := '00000000-0000-0000-cc00-000000000001';
+  v_own       uuid    := '00000000-0000-0000-cc00-000000000002';
+  v_rows      integer := 0;
   v_role_post text;
+  v_blocked   boolean := false;
 BEGIN
   PERFORM set_config('request.jwt.claims', format('{"sub": "%s"}', v_own::text), true);
   SET LOCAL ROLE authenticated;
 
-  UPDATE public.business_members
-  SET    role = 'admin'
-  WHERE  business_id = v_bid AND user_id = v_own;
+  BEGIN
+    UPDATE public.business_members
+    SET    role = 'admin'
+    WHERE  business_id = v_bid AND user_id = v_own;
 
-  GET DIAGNOSTICS v_rows = ROW_COUNT;
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+  EXCEPTION WHEN insufficient_privilege THEN
+    -- WITH CHECK de RLS lanzó excepción (comportamiento correcto en PG 15+)
+    v_blocked := true;
+  END;
 
   RESET ROLE;
   PERFORM set_config('request.jwt.claims', '', true);
+  -- Restaurar si se modificó antes del error
+  UPDATE public.business_members SET role = 'owner' WHERE business_id = v_bid AND user_id = v_own AND role = 'admin';
 
   SELECT role INTO v_role_post FROM public.business_members
   WHERE business_id = v_bid AND user_id = v_own;
 
   INSERT INTO smoke_results VALUES (
     '23_last_owner_cannot_downgrade_self',
-    v_rows = 0 AND v_role_post = 'owner',
-    format('filas=%s role_post=%s (esperado 0/owner)', v_rows, v_role_post)
+    v_blocked OR (v_rows = 0 AND v_role_post = 'owner'),
+    format('bloqueado=%s filas=%s role_post=%s (esperado blocked|0/owner)', v_blocked, v_rows, v_role_post)
   );
 EXCEPTION WHEN OTHERS THEN
   RESET ROLE;

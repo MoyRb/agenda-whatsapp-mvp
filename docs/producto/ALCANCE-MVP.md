@@ -40,15 +40,31 @@
 - 14 smoke tests SQL para validar constraints, seed y RLS
 - Sin conexion a Edge Functions (eso es Corte 5+)
 
+## Corte Vertical 5 — Persistencia de Flow Responses como citas
+
+**Estado: Implementado**
+
+- Webhook extendido: detecta `nfm_reply`, normaliza teléfono E.164, llama RPC Supabase
+- Migración `whatsapp_channels`: tabla con RLS multiempresa (sin DELETE, status='inactive')
+- RPC `create_whatsapp_flow_appointment`: SECURITY DEFINER, solo service_role
+  - Idempotencia con `pg_advisory_xact_lock` + unique index `(business_id, external_reference)`
+  - Valida canal, negocio, timezone, servicio, extras, horario antes de escribir
+  - Upsert customer + INSERT appointment (status=pending) + appointment_extras
+  - Retorna `created_new`: true (nueva cita) o false (idempotente)
+- Módulo compartido `_shared/supabase-client.ts` con soporte para `SUPABASE_SECRET_KEYS`
+- Seed actualizado: canal WhatsApp sintético `phone_number_id='000000000000002'`
+- 26 smoke tests SQL: T01-T26 (validaciones, idempotencia secuencial y permisos)
+- Script de integración `test-whatsapp-booking-webhook.ps1`
+- Script de concurrencia `test-booking-idempotency-concurrency.ps1`
+- Sin Google Calendar, sin respuesta automática al cliente (Corte 6)
+
 ## Fuera de alcance (MVP actual)
 
 - Endpoint dinamico de Flow (data endpoint + RSA)
-- Conexion Edge Functions → Base de datos
-- Disponibilidad real de horarios
-- Prevencion de horarios duplicados
+- Disponibilidad real de horarios (solapamiento de citas)
 - Google Calendar
+- Respuesta automatica de confirmacion al cliente
 - Panel administrativo
 - Fidelizacion
 - Embedded Signup
-- Respuestas automaticas
 - Pagos

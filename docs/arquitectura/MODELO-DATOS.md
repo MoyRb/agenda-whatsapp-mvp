@@ -198,6 +198,47 @@ PK: (business_id, appointment_id, extra_id)
 
 ---
 
+### `whatsapp_channels`
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | uuid PK | gen_random_uuid() |
+| `business_id` | uuid FK → businesses | ON DELETE RESTRICT |
+| `waba_id` | text NOT NULL | CHECK <> '' |
+| `phone_number_id` | text NOT NULL | UNIQUE global |
+| `display_phone_number` | text | nullable |
+| `status` | text NOT NULL | 'active' \| 'inactive' |
+| `created_at` / `updated_at` | timestamptz | trigger set_updated_at |
+
+UNIQUE: `(phone_number_id)` y `(business_id, waba_id, phone_number_id)`
+
+**RLS:** SELECT para miembros; INSERT/UPDATE para owner/admin. Sin DELETE — canales se desactivan con `status='inactive'`.
+
+Indice: `whatsapp_channels_business_id_idx ON (business_id)`
+
+**Canal del seed demo:** `phone_number_id='000000000000002'`, `waba_id='000000000000001'`
+
+---
+
+### RPC `create_whatsapp_flow_appointment`
+
+Funcion SECURITY DEFINER ejecutable solo por `service_role`. Recibe los datos de un `nfm_reply` y persiste la cita de forma atomica e idempotente.
+
+**Firma:**
+```sql
+public.create_whatsapp_flow_appointment(
+  p_phone_number_id, p_customer_phone_e164, p_customer_display_name,
+  p_service_code, p_extra_codes text[], p_appointment_date date,
+  p_appointment_time text, p_flow_version text, p_external_reference text
+) RETURNS TABLE (appointment_id, business_id, created_new, status, starts_at, ends_at)
+```
+
+**Mecanismo de idempotencia:** `pg_advisory_xact_lock(hashtextextended(bid||':'||ref, 0))` + unique index `(business_id, external_reference)`.
+
+**Flujo interno:** validaciones de input → resolver canal/negocio → validar timezone → advisory lock → re-check idempotencia → validaciones de negocio (fecha, servicio, extras, horario) → calcular timestamps con timezone → escritura atomica (customer upsert + appointment + appointment_extras).
+
+---
+
 ## Estrategia RLS
 
 Dos funciones helper `SECURITY DEFINER` para evitar recursion en `business_members`:

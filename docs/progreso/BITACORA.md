@@ -244,6 +244,60 @@ El seed solo incluye catalogo (negocio, servicios, extras, horarios). Usuarios y
 
 ---
 
+## 2026-08-04 — Corte Vertical 5: Persistencia de Flow Responses como citas
+
+### Que se implemento
+
+- `supabase/migrations/20260804120000_add_whatsapp_booking_ingestion.sql`
+  - Tabla `whatsapp_channels` con RLS (sin DELETE, status='inactive')
+  - RPC `create_whatsapp_flow_appointment` (SECURITY DEFINER, solo service_role)
+    - 8 pasos: normalización → canal → timezone → advisory lock → idempotencia → negocio → horario → escritura
+    - Upsert customer (display_name preserva valor existente si nuevo es NULL)
+    - INSERT appointment (status=pending, source=whatsapp_flow) + appointment_extras
+    - Retorna created_new: true/false para log en el webhook
+- `supabase/seed.sql` — canal sintético `phone_number_id='000000000000002'` agregado
+- `supabase/functions/_shared/supabase-client.ts` — cliente service_role con soporte SUPABASE_SECRET_KEYS
+- `supabase/functions/whatsapp-webhook/index.ts` — extendido con `processFlowResponse`
+  - `normalizeToE164`: acepta números sin '+' (comportamiento de Meta)
+  - Timeout de 8s con `Promise.race`; errores P0001 → HTTP 200; timeout → HTTP 500
+  - `logInteractiveMessage` preservada para interactivos no-nfm_reply
+- `tests/booking-ingestion-smoke.sql` — 26 tests T01-T26
+- `tests/test-whatsapp-booking-webhook.ps1` — integración con webhook local
+- `tests/test-booking-idempotency-concurrency.ps1` — dos jobs paralelos + verificación BD
+
+### Decisiones tecnicas
+
+**pg_advisory_xact_lock para concurrencia:**
+Antes del re-check de idempotencia, se adquiere un lock de transacción cuya clave es un hash de `business_id + external_reference`. Esto garantiza que dos llamadas concurrentes con los mismos parámetros serialicen, evitando que ambas superen el re-check y creen dos citas.
+
+**HTTP 200 para errores de negocio P0001:**
+Meta interpreta HTTP 5xx como error transitorio y reintenta. Los errores de negocio (servicio inactivo, horario cerrado, etc.) son permanentes; devolver 200 evita reintentos infinitos. Solo se devuelve 500 ante timeout de BD o error de conexión (verdadero problema transitorio).
+
+**normalizeToE164 en el webhook:**
+Meta puede omitir el '+' en `msg.from`. La normalización ocurre antes de llamar la RPC, que recibe siempre un número E.164 válido. El constraint `CHECK (whatsapp_phone_e164 ~ '^\+[1-9]\d{7,14}$')` en `customers` actúa como última línea de defensa.
+
+**Validación de timezone en la RPC:**
+Si `businesses.timezone` tiene un valor incorrecto, la conversión AT TIME ZONE fallaría con un error de PostgreSQL (no P0001), que el webhook interpretaría como HTTP 500 y Meta reintentaría indefinidamente. La validación explícita contra `pg_timezone_names` convierte este error en P0001 → HTTP 200 (sin reintentos).
+
+**`_shared/supabase-client.ts`:**
+Centraliza la inicialización del cliente service_role. Prioriza `SUPABASE_SECRET_KEYS` (formato JSON, inyectado por Supabase Runtime v2) con fallback a `SUPABASE_SERVICE_ROLE_KEY` (legacy / local). Nunca imprime el contenido de las variables de entorno.
+
+### Decisiones que afectan Corte 6
+
+| Decision | Impacto |
+|----------|---------|
+| `external_reference = msg.id` | Corte 6 agrega `calendar_event_id` nullable; no reutilizar este campo |
+| `status = 'pending'` | Corte 6 hace UPDATE a 'confirmed' tras crear evento en Calendar |
+| La RPC no retorna `customer_id` | Corte 6 lo obtiene via JOIN a appointments |
+| Sin validacion de solapamiento | Corte 6 verifica disponibilidad con Calendar como fuente de verdad |
+
+### Estado al cierre
+- Implementado: ✅
+- Validado localmente: pendiente — requiere Docker y supabase start
+- Validado en produccion: pendiente — requiere autorizacion del usuario
+
+---
+
 ## 2026-08-03 — Corte 4, rev 2: corrección de CHECK con subquery → FK compuestas
 
 ### Problema detectado
