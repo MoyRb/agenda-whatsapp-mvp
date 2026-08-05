@@ -80,6 +80,34 @@
 
 ---
 
+## Corte Vertical 5 — Persistencia de Flow Responses
+
+| Campo | Detalle |
+|-------|---------|
+| Fecha implementacion | 2026-08-04 |
+| Fecha validacion local | pendiente — requiere Docker + supabase start |
+| Estado | **Implementado** |
+
+### Criterio de finalizacion
+
+- **Implementado:** migracion + seed + shared client + webhook + smoke tests + scripts creados. ✅
+- **Validado localmente:** `supabase db reset --local` + 26 smoke tests PASS + test-whatsapp-booking-webhook.ps1 HTTP 200. ⬜
+- **Validado en produccion:** `supabase db push` + despliegue del webhook actualizado. ⬜
+
+### Archivos creados / modificados
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `supabase/migrations/20260804120000_add_whatsapp_booking_ingestion.sql` | Tabla whatsapp_channels + RPC |
+| `supabase/seed.sql` | Canal WhatsApp sintetico agregado |
+| `supabase/functions/_shared/supabase-client.ts` | Cliente Supabase service_role (nuevo) |
+| `supabase/functions/whatsapp-webhook/index.ts` | Extendido: nfm_reply → RPC → BD |
+| `tests/booking-ingestion-smoke.sql` | 26 smoke tests SQL (T01-T26) |
+| `tests/test-whatsapp-booking-webhook.ps1` | Test de integracion con webhook local |
+| `tests/test-booking-idempotency-concurrency.ps1` | Test de idempotencia bajo concurrencia |
+
+---
+
 ## Funciones Edge
 
 | Función | Ruta | Auth | Implementado | Validado |
@@ -101,4 +129,7 @@
 - [ ] Corte 3: Confirmar nfm_reply en webhook
 - [x] Corte 4: Nucleo de datos multiempresa (implementado)
 - [x] Corte 4: Validado localmente (supabase db reset + 25 smoke tests PASS)
-- [ ] Corte 5: Conectar webhook → BD → Google Calendar
+- [x] Corte 5: Webhook → RPC → BD (implementado)
+- [ ] Corte 5: Validar localmente (supabase db reset + 26 smoke tests + test-whatsapp-booking-webhook.ps1)
+- [ ] Corte 5: Desplegar a produccion (supabase db push + functions deploy)
+- [ ] Corte 6: Google Calendar + confirmacion al cliente

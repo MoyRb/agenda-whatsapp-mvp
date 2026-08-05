@@ -11,6 +11,17 @@ Agente de WhatsApp para gestión de citas: recibe mensajes de clientes, agenda e
 - **Calendario:** Google Calendar API (fuera de alcance — Corte 1)
 - **CLI:** Supabase CLI
 
+## Alcance del Corte Vertical 5
+
+Webhook conectado a BD — sin Google Calendar ni respuesta al cliente.
+
+- Migración `whatsapp_channels` + RPC `create_whatsapp_flow_appointment` (SECURITY DEFINER, solo service_role)
+- Idempotencia: `pg_advisory_xact_lock(hashtextextended(bid||':'||ref, 0))` + unique index `(business_id, external_reference)`
+- Webhook extendido: nfm_reply → normalizar teléfono → timeout 8s → RPC → log sanitizado
+- HTTP 200 para errores de negocio P0001; HTTP 500 solo para timeout / error de conexión BD
+- Módulo compartido `_shared/supabase-client.ts` (SUPABASE_SECRET_KEYS → SUPABASE_SERVICE_ROLE_KEY)
+- 26 smoke tests SQL T01-T26; test-whatsapp-booking-webhook.ps1; test-booking-idempotency-concurrency.ps1
+
 ## Alcance del Corte Vertical 4
 
 Capa de persistencia en Supabase/PostgreSQL — sin conexion a Edge Functions aun.
@@ -152,11 +163,34 @@ supabase db reset --local          # aplica migraciones + seed desde cero
 supabase migration new <nombre>    # crear nueva migración vacía
 ```
 
-### Smoke tests de esquema
+### Smoke tests de esquema (Corte 4)
 ```bash
 # Requiere supabase start + supabase db reset --local previos
 psql postgresql://postgres:postgres@localhost:54322/postgres \
   -f tests/booking-schema-smoke.sql
+```
+
+### Smoke tests de ingestión (Corte 5)
+```bash
+# Requiere supabase start + supabase db reset --local previos
+psql postgresql://postgres:postgres@localhost:54322/postgres \
+  -f tests/booking-ingestion-smoke.sql
+```
+
+### Prueba de integración — Corte 5 (webhook → BD)
+```powershell
+# El webhook debe estar corriendo con supabase functions serve
+$env:META_APP_SECRET = "tu-app-secret"
+.\tests\test-whatsapp-booking-webhook.ps1
+# Con idempotencia (mismo external_reference):
+.\tests\test-whatsapp-booking-webhook.ps1 -Duplicate
+```
+
+### Prueba de concurrencia — Corte 5
+```powershell
+$env:META_APP_SECRET = "tu-app-secret"
+.\tests\test-booking-idempotency-concurrency.ps1
+# Esperado: 2 HTTP 200, exactamente 1 cita, 1 customer, 1 appointment_extra
 ```
 
 ### Deploy de migraciones a producción
@@ -179,11 +213,14 @@ Definir en `supabase/.env.local` (local) y via `supabase secrets set` (producci�
 | `META_APP_SECRET` | No (Corte 2) | Para firma HMAC del webhook |
 | `META_GRAPH_API_VERSION` | Sí | Ej. `v20.0`. Sin fallback — obligatorio |
 | `WHATSAPP_FLOW_ID` | No (Corte 3) | ID del Flow publicado en Meta. Puede pasarse en el request |
+| `SUPABASE_URL` | Sí (Corte 5) | URL del proyecto Supabase (inyectado automáticamente en Runtime) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Sí (Corte 5) | Clave service_role — alternativa a SUPABASE_SECRET_KEYS |
+| `SUPABASE_SECRET_KEYS` | No (Corte 5) | JSON `{"default":"..."}` inyectado por Supabase Runtime v2 (preferido) |
 
 ## Próximos módulos (fuera de alcance ahora)
 
-- Corte 4: Integración Google Calendar
-- Base de datos / migraciones Supabase
+- Corte 6: Google Calendar + confirmación automática al cliente
 - Panel administrativo
 - Lógica de fidelización
 - WhatsApp Flows con endpoint dinámico / Embedded Signup
+- Prevención de horarios duplicados (solapamiento de citas)

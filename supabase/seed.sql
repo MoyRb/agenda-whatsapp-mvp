@@ -166,3 +166,19 @@ VALUES
   ('00000000-0000-0000-0000-000000000001', 5, false, '09:00', '19:00'),
   ('00000000-0000-0000-0000-000000000001', 6, false, '09:00', '19:00')
 ON CONFLICT (business_id, weekday) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Canal WhatsApp sintético (SOLO local, datos ficticios)
+-- Sincronizado con tests/test-whatsapp-booking-webhook.ps1
+-- ---------------------------------------------------------------------------
+
+INSERT INTO public.whatsapp_channels (id, business_id, waba_id, phone_number_id, display_phone_number, status)
+VALUES (
+  '00000000-0000-0000-0003-000000000001',
+  '00000000-0000-0000-0000-000000000001',
+  '000000000000001',
+  '000000000000002',
+  '+520000000001',
+  'active'
+)
+ON CONFLICT (phone_number_id) DO NOTHING;

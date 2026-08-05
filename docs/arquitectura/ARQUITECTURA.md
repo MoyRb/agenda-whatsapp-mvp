@@ -13,15 +13,16 @@ Meta Graph API
       v
 Supabase Edge Functions (Deno / TypeScript)
   ├─ whatsapp-send          [Corte 1 — validado]
-  ├─ whatsapp-webhook       [Corte 2 — validado]
-  ├─ whatsapp-flow-send     [Corte 3 — implementado]
-  └─ (booking-create)       [Corte 5 — pendiente]
+  ├─ whatsapp-webhook       [Corte 2 — validado / Corte 5 — implementado]
+  └─ whatsapp-flow-send     [Corte 3 — implementado]
       |
       v
-Supabase PostgreSQL (RLS multiempresa)  [Corte 4 — implementado]
+Supabase PostgreSQL (RLS multiempresa)  [Corte 4+5 — implementado]
+  ├─ whatsapp_channels
+  └─ RPC create_whatsapp_flow_appointment
       |
       v
-Google Calendar API                     [Corte 5+ — pendiente]
+Google Calendar API                     [Corte 6 — pendiente]
 ```
 
 ---
@@ -60,17 +61,33 @@ appointments → appointment_extras
 
 ---
 
-## Flujo de mensajes (futuro — Corte 5+)
+## Flujo de mensajes (Corte 5 — implementado)
 
 ```
 1. Cliente envia mensaje a WhatsApp Business
 2. Meta entrega POST al webhook (whatsapp-webhook)
-3. Webhook valida HMAC, detecta tipo de mensaje
+3. Webhook valida HMAC-SHA256
 4. Si es nfm_reply (respuesta de Flow):
-   a. Parsea response_json
-   b. Llama a booking-create (Edge Function interna)
-   c. booking-create inserta en appointments con service_role
-   d. Responde al cliente via whatsapp-send
+   a. Normaliza telefono a E.164 (Meta puede omitir '+')
+   b. Parsea response_json (solo claves conocidas)
+   c. Valida flow_version y formato de fecha
+   d. Llama a create_whatsapp_flow_appointment via Supabase service_role
+      - pg_advisory_xact_lock para idempotencia concurrente
+      - Valida canal, negocio, timezone, servicio, extras, horario
+      - Upsert customer + INSERT appointment + appointment_extras
+   e. Log sanitizado: appointmentIdSuffix, createdNew, status
+5. Errores de negocio (P0001) → HTTP 200 (no reintentar)
+6. Timeout BD (>8s) / error conexion → HTTP 500 (Meta reintenta)
+```
+
+## Flujo de mensajes (futuro — Corte 6+)
+
+```
+Tras crear cita (status=pending):
+1. Verificar disponibilidad en Google Calendar
+2. Crear evento en Google Calendar
+3. UPDATE appointments SET status='confirmed'
+4. Enviar confirmacion al cliente via whatsapp-send
 ```
 
 ---
@@ -95,6 +112,7 @@ Los codigos de servicio y extra en el Flow JSON estatico (`haircut`, `beard`, et
 
 Ver `CLAUDE.md` o `.env.example` para la lista completa.
 
-Las funciones que accedan a BD en Corte 5+ requeriran:
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+Las funciones que accedan a BD requieren:
+- `SUPABASE_URL` — inyectado automáticamente por Supabase Runtime
+- `SUPABASE_SECRET_KEYS` — inyectado automáticamente (preferido, Runtime v2)
+- `SUPABASE_SERVICE_ROLE_KEY` — alternativa legacy / desarrollo local
