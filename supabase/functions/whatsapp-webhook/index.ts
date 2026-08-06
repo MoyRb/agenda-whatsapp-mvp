@@ -347,6 +347,7 @@ async function processFlowResponse(
     if (rows.length > 0) {
       const row = rows[0] as {
         appointment_id: string;
+        business_id: string;
         created_new: boolean;
         status: string;
       };
@@ -360,6 +361,31 @@ async function processFlowResponse(
         createdNew: row.created_new,
         status: row.status,
       }));
+
+      // Fire-and-forget: disparar sincronización con Google Calendar
+      // El trigger de BD ya creó el job atómicamente con la cita.
+      // EdgeRuntime.waitUntil mantiene la función viva sin bloquear el 200 a Meta.
+      if (row.created_new) {
+        const syncUrl = Deno.env.get("GOOGLE_CALENDAR_SYNC_URL");
+        const functionSecret = Deno.env.get("INTERNAL_FUNCTION_SECRET") ?? "";
+        if (syncUrl) {
+          const syncPromise = fetch(syncUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-internal-secret": functionSecret,
+            },
+            body: JSON.stringify({
+              business_id: row.business_id,
+              appointment_id: row.appointment_id,
+            }),
+          }).catch(() => {
+            // Silenciar: el job ya está en BD y puede reintentarse manualmente
+          });
+          (EdgeRuntime as unknown as { waitUntil?: (p: Promise<unknown>) => void })
+            .waitUntil?.(syncPromise);
+        }
+      }
     }
     return false;
 

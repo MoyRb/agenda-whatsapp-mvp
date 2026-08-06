@@ -115,6 +115,43 @@
 | `whatsapp-send` | `supabase/functions/whatsapp-send/index.ts` | `x-internal-secret` | ✅ | ✅ |
 | `whatsapp-webhook` | `supabase/functions/whatsapp-webhook/index.ts` | HMAC-SHA256 / verify_token | ✅ | ✅ |
 | `whatsapp-flow-send` | `supabase/functions/whatsapp-flow-send/index.ts` | `x-internal-secret` | ✅ | ⬜ |
+| `google-oauth-start` | `supabase/functions/google-oauth-start/index.ts` | `x-internal-secret` | ✅ | ⬜ |
+| `google-oauth-callback` | `supabase/functions/google-oauth-callback/index.ts` | HMAC-SHA256 state | ✅ | ⬜ |
+| `google-calendar-sync` | `supabase/functions/google-calendar-sync/index.ts` | `x-internal-secret` | ✅ | ⬜ |
+
+---
+
+---
+
+## Corte Vertical 6 — Google Calendar Sync
+
+| Campo | Detalle |
+|-------|---------|
+| Fecha implementacion | 2026-08-05 |
+| Fecha validacion local | pendiente |
+| Estado | **Implementado** |
+
+### Criterio de finalizacion
+
+- **Implementado:** migracion + shared module + 3 Edge Functions + smoke tests + scripts. ✅
+- **Validado localmente:** `supabase db reset --local` + 27 smoke tests SQL PASS + test-google-calendar-sync.ps1 + test-google-oauth-flow.ps1. ⬜
+- **Validado end-to-end:** OAuth con cuenta Google real + booking via WhatsApp + evento en Calendar. ⬜
+
+### Archivos creados / modificados
+
+| Archivo | Descripcion |
+|---------|-------------|
+| `supabase/migrations/20260805120000_add_google_calendar_sync.sql` | 3 tablas, trigger outbox, 10 RPCs, índices, RLS |
+| `supabase/functions/_shared/google-calendar.ts` | Helpers reutilizables: refresh, insert/get event, classify |
+| `supabase/functions/google-oauth-start/index.ts` | Genera URL OAuth (requiere x-internal-secret) |
+| `supabase/functions/google-oauth-callback/index.ts` | Callback OAuth público, valida HMAC, guarda conexión |
+| `supabase/functions/google-calendar-sync/index.ts` | Worker de sync (requiere x-internal-secret) |
+| `supabase/functions/whatsapp-webhook/index.ts` | Modificado: fire-and-forget EdgeRuntime.waitUntil |
+| `supabase/config.toml` | 3 nuevas entradas [functions.*] verify_jwt=false |
+| `.env.example` | Valores vaciados + 4 vars nuevas de Google + nota de rotación |
+| `tests/calendar-sync-smoke.sql` | 27 smoke tests SQL (T01-T27) |
+| `tests/test-google-calendar-sync.ps1` | TC01-TC21 con verificacion de BD |
+| `tests/test-google-oauth-flow.ps1` | TO01-TO09 con verificacion de state HMAC |
 
 ---
 
@@ -132,4 +169,7 @@
 - [x] Corte 5: Webhook → RPC → BD (implementado)
 - [ ] Corte 5: Validar localmente (supabase db reset + 26 smoke tests + test-whatsapp-booking-webhook.ps1)
 - [ ] Corte 5: Desplegar a produccion (supabase db push + functions deploy)
-- [ ] Corte 6: Google Calendar + confirmacion al cliente
+- [x] Corte 6: Google Calendar + confirmacion al cliente (implementado)
+- [ ] Corte 6: Validar localmente (supabase db reset + 27 smoke tests SQL + PowerShell)
+- [ ] Corte 6: Validar end-to-end con cuenta Google real
+- [ ] Corte 6: Desplegar a produccion
